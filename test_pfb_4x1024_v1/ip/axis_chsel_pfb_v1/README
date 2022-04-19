@@ -1,0 +1,107 @@
+Channel Selection IP for PFB multi-lane implementation.
+
+###################
+### Description ###
+###################
+This block allows to extract a single channel from the incoming,
+multi-lane stream of the Polyphase Filter Bank implementation.
+
+The user can select the CHID using a register. To change the routing
+it is necessary to issue a STOP command, followed by START. This is 
+done writing into the START_REG.
+
+The block relies on TLAST input to signal the end of a frame. When
+TLAST = '1' at the input, the block understands this is the last 
+sample of the frame. Channel 0 is the left-most part of the next
+sample. If TLAST is never received, the block won't generate any
+output sample. This ease the use of the block to any FFT length,
+because TLAST indicates the end of the frame, instead of counting
+packets from a start.
+
+AXI Slave I/F:
+This AXI-Lite I/F is used to configure the registers of the block.
+It can be connected to any AXI-Lite Master I/F like uBlaze or Zynq.
+
+AXIS Slave I/F:
+This is the interfase that is used to receive the data. Data is
+grouped into I/Q pairs. Below there is a detaled description of
+data ordering in the input.
+
+AXI Master I/F:
+This interfase is used to send data out of the block. Only one I/Q
+pair is maintained, which corresponds to the selected channel.
+
+##################
+### Parameters ###
+##################
+B : number of bits of I/Q parts. One output sample is composed of
+an I/Q pair, B bits each, for a total of 2*B bits.
+
+L : number of lanes. This indicates the number of samples packed 
+on each input sample. Each sample is 2*B bits, so for L lanes, the
+input has 2*B*L bits.
+
+#################
+### Registers ###
+#################
+0 : START_REG: 1 bit (r/w).
+-> 0 	: stop.
+-> 1 	: start.
+
+1 : CHID_REG: 32 bit (r/w).
+-> ID of the channel to be routed to the output.
+
+############################
+### Detailed description ###
+############################
+The block has an internal state machine that will compute the offset
+from the first sample, and then another offset to extract the desired
+channel from the incoming input data. Input data format is as follows:
+
+|---------------------------------------|
+| Q[L-1] I[L-1] ... Q[1] I[1] Q[0] I[0] |
+|---------------------------------------|
+ \                                     /
+  \                                   /
+   \                                 /
+    \                               /
+              2*L*B bits
+
+Once the TLAST signal is received at the input, the following packet is
+supposed to contain channels 0 to L-1. The next packet channels L to
+2*L - 1 and so on. For example, if L = 4 and the user selects CHID = 3,
+the packet after TLAST will contain channels 0, 1, 2 and 3. So the block
+will send to the output the pair Q[3] I[3] from the first packet aftet
+TLAST. If, instead, the user selects 17, channels will be as follows:
+
+CH[X] 	CH[X] 	CH[X] 	CH[X]	-> TLAST = '1'
+CH[3] 	CH[2] 	CH[1] 	CH[0]
+CH[7] 	CH[6] 	CH[5] 	CH[4]
+CH[11] 	CH[10] 	CH[9] 	CH[8]
+CH[15] 	CH[14] 	CH[13] 	CH[12]
+CH[19] 	CH[18] 	CH[17] 	CH[16]	-> Selected packet.
+CH[23] 	CH[22] 	CH[21] 	CH[20]
+...
+CH[X] 	CH[X] 	CH[X] 	CH[X]	-> TLAST = '1'
+CH[3] 	CH[2] 	CH[1] 	CH[0]
+CH[7] 	CH[6] 	CH[5] 	CH[4]
+CH[11] 	CH[10] 	CH[9] 	CH[8]
+CH[15] 	CH[14] 	CH[13] 	CH[12]
+CH[19] 	CH[18] 	CH[17] 	CH[16]	-> Selected packet.
+CH[23] 	CH[22] 	CH[21] 	CH[20]
+...
+
+From the selected packet, the block will send out the pair Q[1] I[1],
+which corresponds to CHID = 17.
+
+Notice that the input can have any number of channels, which means that 
+the block relies on TLAST = '1' to start counting the channels. If the
+input does not have a packet with TLAST = '1', no output data will be
+sent out.
+
+Another detail is that, once the block starts counting to get the desired
+channel, intermediate TLAST = '1' will be lost, and won't cause the block
+to start again. The only packet that can contain the chosen channel and
+TLAST = '1' is the last packet. In other words, if the chosen channel is
+in a packet that also containts TLAST = '1', the block will start counting
+again from the very next packet, after sending out the output.
